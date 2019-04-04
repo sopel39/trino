@@ -17,8 +17,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import io.airlift.units.DataSize;
+import io.prestosql.Session;
 import io.prestosql.memory.context.AggregatedMemoryContext;
 import io.prestosql.memory.context.LocalMemoryContext;
+import io.prestosql.memory.context.MemoryTrackingContext;
 import io.prestosql.metadata.Split;
 import io.prestosql.metadata.TableHandle;
 import io.prestosql.operator.WorkProcessor.ProcessState;
@@ -232,7 +234,7 @@ public class ScanFilterAndProjectOperator
     }
 
     public static class ScanFilterAndProjectOperatorFactory
-            implements SourceOperatorFactory
+            implements SourceOperatorFactory, WorkProcessorSourceOperatorFactory
     {
         private final int operatorId;
         private final PlanNodeId planNodeId;
@@ -287,6 +289,25 @@ public class ScanFilterAndProjectOperator
             return new ScanFilterAndProjectOperator(
                     operatorContext,
                     sourceId,
+                    pageSourceProvider,
+                    cursorProcessor.get(),
+                    pageProcessor.get(),
+                    table,
+                    columns,
+                    types,
+                    minOutputPageSize,
+                    minOutputPageRowCount);
+        }
+
+        @Override
+        public WorkProcessorSourceOperator create(Session session, MemoryTrackingContext memoryTrackingContext, DriverYieldSignal yieldSignal, WorkProcessor<Split> splits)
+        {
+            return new ScanFilterAndProjectWorkProcessorOperator(
+                    operatorId,
+                    session,
+                    memoryTrackingContext,
+                    yieldSignal,
+                    splits,
                     pageSourceProvider,
                     cursorProcessor.get(),
                     pageProcessor.get(),
