@@ -85,6 +85,7 @@ public class ScanFilterAndProjectOperator
         pages = WorkProcessor.create(
                 new SplitToPages(operatorContext.aggregateSystemMemoryContext()))
                 .transformProcessor(WorkProcessor::flatten)
+                .map(Page::getLoadedPage)
                 .finishWhen(() -> operatorFinishing);
     }
 
