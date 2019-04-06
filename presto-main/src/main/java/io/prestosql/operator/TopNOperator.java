@@ -14,25 +14,21 @@
 package io.prestosql.operator;
 
 import com.google.common.collect.ImmutableList;
-import io.prestosql.memory.context.LocalMemoryContext;
 import io.prestosql.spi.Page;
 import io.prestosql.spi.block.SortOrder;
 import io.prestosql.spi.type.Type;
 import io.prestosql.sql.planner.plan.PlanNodeId;
 
-import java.util.Iterator;
 import java.util.List;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.base.Verify.verify;
-import static java.util.Collections.emptyIterator;
 import static java.util.Objects.requireNonNull;
 
 /**
  * Returns the top N rows from the source sorted according to the specified ordering in the keyChannelIndex channel.
  */
 public class TopNOperator
+        extends AbstractTopNOperator
         implements Operator
 {
     public static class TopNOperatorFactory
@@ -89,12 +85,7 @@ public class TopNOperator
     }
 
     private final OperatorContext operatorContext;
-    private final LocalMemoryContext localUserMemoryContext;
-
-    private GroupedTopNBuilder topNBuilder;
     private boolean finishing;
-
-    private Iterator<Page> outputIterator;
 
     public TopNOperator(
             OperatorContext operatorContext,
@@ -103,21 +94,17 @@ public class TopNOperator
             List<Integer> sortChannels,
             List<SortOrder> sortOrders)
     {
+        super(
+                operatorContext.aggregateUserMemoryContext(),
+                types,
+                n,
+                sortChannels,
+                sortOrders);
+
         this.operatorContext = requireNonNull(operatorContext, "operatorContext is null");
-        this.localUserMemoryContext = operatorContext.localUserMemoryContext();
-        checkArgument(n >= 0, "n must be positive");
 
         if (n == 0) {
             finishing = true;
-            outputIterator = emptyIterator();
-        }
-        else {
-            topNBuilder = new GroupedTopNBuilder(
-                    types,
-                    new SimplePageWithPositionComparator(types, sortChannels, sortOrders),
-                    n,
-                    false,
-                    new NoChannelGroupByHash());
         }
     }
 
@@ -149,10 +136,7 @@ public class TopNOperator
     public void addInput(Page page)
     {
         checkState(!finishing, "Operator is already finishing");
-        boolean done = topNBuilder.processPage(requireNonNull(page, "page is null")).process();
-        // there is no grouping so work will always be done
-        verify(done);
-        updateMemoryReservation();
+        super.addInput(page);
     }
 
     @Override
@@ -162,29 +146,6 @@ public class TopNOperator
             return null;
         }
 
-        if (outputIterator == null) {
-            // start flushing
-            outputIterator = topNBuilder.buildResult();
-        }
-
-        Page output = null;
-        if (outputIterator.hasNext()) {
-            output = outputIterator.next();
-        }
-        else {
-            outputIterator = emptyIterator();
-        }
-        updateMemoryReservation();
-        return output;
-    }
-
-    private void updateMemoryReservation()
-    {
-        localUserMemoryContext.setBytes(topNBuilder.getEstimatedSizeInBytes());
-    }
-
-    private boolean noMoreOutput()
-    {
-        return outputIterator != null && !outputIterator.hasNext();
+        return super.getOutput();
     }
 }
