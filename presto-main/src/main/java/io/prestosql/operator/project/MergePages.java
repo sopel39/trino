@@ -127,7 +127,7 @@ public class MergePages
                 return ofResult(flush(), false);
             }
 
-            if (inputPage.getPositionCount() >= minRowCount || inputPage.getSizeInBytes() >= minPageSizeInBytes) {
+            if (inputPage.getPositionCount() >= minRowCount || true || inputPage.getSizeInBytes() >= minPageSizeInBytes) {
                 if (pageBuilder.isEmpty()) {
                     return ofResult(inputPage);
                 }

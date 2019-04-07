@@ -326,9 +326,9 @@ public class QueryContext
     @GuardedBy("this")
     private void enforceTotalMemoryLimit(long allocated, long delta, long maxMemory)
     {
-        if (allocated + delta > maxMemory) {
+        /*if (allocated + delta > maxMemory) {
             throw exceededLocalTotalMemoryLimit(succinctBytes(maxMemory), getAdditionalFailureInfo(allocated, delta));
-        }
+        }*/
     }
 
     @GuardedBy("this")

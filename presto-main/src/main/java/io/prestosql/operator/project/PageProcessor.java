@@ -81,9 +81,9 @@ public class PageProcessor
                 });
         this.projections = requireNonNull(projections, "projections is null").stream()
                 .map(projection -> {
-                    if (projection.getInputChannels().size() == 1 && projection.isDeterministic()) {
+                    /*if (projection.getInputChannels().size() == 1 && projection.isDeterministic()) {
                         return new DictionaryAwarePageProjection(projection, dictionarySourceIdFunction);
-                    }
+                    }*/
                     return projection;
                 })
                 .collect(toImmutableList());
@@ -201,7 +201,7 @@ public class PageProcessor
                 Page resultPage = result.getPage();
 
                 // if we produced a large page or if the expression is expensive, halve the batch size for the next call
-                long pageSize = resultPage.getSizeInBytes();
+                long pageSize = 0; //resultPage.getSizeInBytes();
                 if (resultPage.getPositionCount() > 1 && (pageSize > MAX_PAGE_SIZE_IN_BYTES || expressionProfiler.isExpressionExpensive())) {
                     projectBatchSize = projectBatchSize / 2;
                 }
@@ -254,13 +254,13 @@ public class PageProcessor
                 }
             }
             for (Block previouslyComputedResult : previouslyComputedResults) {
-                if (previouslyComputedResult != null) {
+                /*if (previouslyComputedResult != null) {
                     previouslyComputedResult.retainedBytesForEachPart((object, size) -> {
                         if (referenceCountMap.incrementAndGet(object) == 1) {
                             retainedSizeInBytes += size;
                         }
                     });
-                }
+                }*/
             }
 
             memoryContext.setBytes(retainedSizeInBytes);
@@ -300,7 +300,7 @@ public class PageProcessor
                     blocks[i] = previouslyComputedResults[i];
                 }
 
-                pageSize += blocks[i].getSizeInBytes();
+                //pageSize += blocks[i].getSizeInBytes();
             }
             return ProcessBatchResult.processBatchSuccess(new Page(positionsBatch.size(), blocks));
         }
