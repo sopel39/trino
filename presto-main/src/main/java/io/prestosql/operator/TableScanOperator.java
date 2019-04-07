@@ -16,7 +16,9 @@ package io.prestosql.operator;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
+import io.prestosql.Session;
 import io.prestosql.memory.context.LocalMemoryContext;
+import io.prestosql.memory.context.MemoryTrackingContext;
 import io.prestosql.metadata.Split;
 import io.prestosql.metadata.TableHandle;
 import io.prestosql.spi.Page;
@@ -44,7 +46,7 @@ public class TableScanOperator
         implements SourceOperator, Closeable
 {
     public static class TableScanOperatorFactory
-            implements SourceOperatorFactory
+            implements SourceOperatorFactory, WorkProcessorSourceOperatorFactory
     {
         private final int operatorId;
         private final PlanNodeId sourceId;
@@ -81,6 +83,23 @@ public class TableScanOperator
             return new TableScanOperator(
                     operatorContext,
                     sourceId,
+                    pageSourceProvider,
+                    table,
+                    columns);
+        }
+
+        @Override
+        public WorkProcessorSourceOperator create(
+                Session session,
+                MemoryTrackingContext memoryTrackingContext,
+                DriverYieldSignal yieldSignal,
+                WorkProcessor<Split> splits)
+        {
+            return new TableScanWorkProcessorOperator(
+                    operatorId,
+                    session,
+                    memoryTrackingContext,
+                    splits,
                     pageSourceProvider,
                     table,
                     columns);
