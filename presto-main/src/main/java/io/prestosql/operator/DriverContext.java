@@ -297,7 +297,10 @@ public class DriverContext
     public List<OperatorStats> getOperatorStats()
     {
         return operatorContexts.stream()
-                .map(OperatorContext::getOperatorStats)
+                .flatMap(operatorContext -> operatorContext
+                        .getNestedOperatorStats()
+                        .orElse(ImmutableList.of(operatorContext.getOperatorStats()))
+                        .stream())
                 .collect(toImmutableList());
     }
 
