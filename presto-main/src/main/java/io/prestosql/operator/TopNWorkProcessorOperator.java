@@ -13,14 +13,21 @@
  */
 package io.prestosql.operator;
 
+import com.google.common.collect.ImmutableList;
+import io.prestosql.Session;
 import io.prestosql.memory.context.MemoryTrackingContext;
 import io.prestosql.operator.WorkProcessor.TransformationState;
+import io.prestosql.operator.WorkProcessorOperatorAdapter.AdapterWorkProcessorOperatorFactory;
+import io.prestosql.operator.WorkProcessorOperatorAdapter.PageBuffer;
 import io.prestosql.spi.Page;
 import io.prestosql.spi.block.SortOrder;
 import io.prestosql.spi.type.Type;
+import io.prestosql.sql.planner.plan.PlanNodeId;
 
 import java.util.List;
+import java.util.Optional;
 
+import static com.google.common.base.Preconditions.checkState;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -29,6 +36,94 @@ import static java.util.Objects.requireNonNull;
 public class TopNWorkProcessorOperator
         implements WorkProcessorOperator
 {
+    public static class TopNOperatorFactory
+            implements OperatorFactory, AdapterWorkProcessorOperatorFactory
+    {
+        private final int operatorId;
+        private final PlanNodeId planNodeId;
+        private final List<Type> sourceTypes;
+        private final int n;
+        private final List<Integer> sortChannels;
+        private final List<SortOrder> sortOrders;
+        private boolean closed;
+
+        public TopNOperatorFactory(
+                int operatorId,
+                PlanNodeId planNodeId,
+                List<? extends Type> types,
+                int n,
+                List<Integer> sortChannels,
+                List<SortOrder> sortOrders)
+        {
+            this.operatorId = operatorId;
+            this.planNodeId = requireNonNull(planNodeId, "planNodeId is null");
+            this.sourceTypes = ImmutableList.copyOf(requireNonNull(types, "types is null"));
+            this.n = n;
+            this.sortChannels = ImmutableList.copyOf(requireNonNull(sortChannels, "sortChannels is null"));
+            this.sortOrders = ImmutableList.copyOf(requireNonNull(sortOrders, "sortOrders is null"));
+        }
+
+        @Override
+        public int getOperatorId()
+        {
+            return operatorId;
+        }
+
+        @Override
+        public Operator createOperator(DriverContext driverContext)
+        {
+            checkState(!closed, "Factory is already closed");
+            OperatorContext operatorContext = driverContext.addOperatorContext(operatorId, planNodeId, TopNWorkProcessorOperator.class.getSimpleName());
+            return new WorkProcessorOperatorAdapter(operatorContext, this);
+        }
+
+        @Override
+        public void noMoreOperators()
+        {
+            closed = true;
+        }
+
+        @Override
+        public OperatorFactory duplicate()
+        {
+            return new TopNOperatorFactory(operatorId, planNodeId, sourceTypes, n, sortChannels, sortOrders);
+        }
+
+        @Override
+        public WorkProcessorOperator create(
+                Session session,
+                MemoryTrackingContext memoryTrackingContext,
+                DriverYieldSignal yieldSignal,
+                WorkProcessor<Page> sourcePages)
+        {
+            return new TopNWorkProcessorOperator(
+                    memoryTrackingContext,
+                    sourcePages,
+                    sourceTypes,
+                    n,
+                    sortChannels,
+                    sortOrders,
+                    Optional.empty());
+        }
+
+        @Override
+        public WorkProcessorOperator create(
+                Session session,
+                MemoryTrackingContext memoryTrackingContext,
+                DriverYieldSignal yieldSignal,
+                PageBuffer sourcePageBuffer)
+        {
+            return new TopNWorkProcessorOperator(
+                    memoryTrackingContext,
+                    sourcePageBuffer.pages(),
+                    sourceTypes,
+                    n,
+                    sortChannels,
+                    sortOrders,
+                    Optional.of(sourcePageBuffer));
+        }
+    }
+
     private final TopNProcessor topNProcessor;
     private final WorkProcessor<Page> pages;
 
@@ -38,7 +133,8 @@ public class TopNWorkProcessorOperator
             List<Type> types,
             int n,
             List<Integer> sortChannels,
-            List<SortOrder> sortOrders)
+            List<SortOrder> sortOrders,
+            Optional<PageBuffer> pageBuffer)
     {
         this.topNProcessor = new TopNProcessor(
                 requireNonNull(memoryTrackingContext, "memoryTrackingContext is null").aggregateUserMemoryContext(),
@@ -53,6 +149,10 @@ public class TopNWorkProcessorOperator
         else {
             pages = sourcePages.transform(new TopNPages());
         }
+
+        pageBuffer.ifPresent(buffer -> buffer.setAddPageListener(() -> {
+            addPage(buffer.poll());
+        }));
     }
 
     @Override
@@ -66,6 +166,11 @@ public class TopNWorkProcessorOperator
             throws Exception
     {}
 
+    private void addPage(Page page)
+    {
+        topNProcessor.addInput(page);
+    }
+
     private class TopNPages
             implements WorkProcessor.Transformation<Page, Page>
     {
@@ -73,7 +178,7 @@ public class TopNWorkProcessorOperator
         public TransformationState<Page> process(Page inputPage)
         {
             if (inputPage != null) {
-                topNProcessor.addInput(inputPage);
+                addPage(inputPage);
                 return TransformationState.needsMoreData();
             }
 

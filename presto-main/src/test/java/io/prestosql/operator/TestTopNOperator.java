@@ -16,7 +16,7 @@ package io.prestosql.operator;
 import com.google.common.collect.ImmutableList;
 import io.airlift.units.DataSize;
 import io.prestosql.ExceededMemoryLimitException;
-import io.prestosql.operator.TopNOperator.TopNOperatorFactory;
+import io.prestosql.operator.TopNWorkProcessorOperator.TopNOperatorFactory;
 import io.prestosql.spi.Page;
 import io.prestosql.spi.block.SortOrder;
 import io.prestosql.spi.type.Type;
@@ -24,7 +24,6 @@ import io.prestosql.sql.planner.plan.PlanNodeId;
 import io.prestosql.testing.MaterializedResult;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import java.util.List;
@@ -74,14 +73,7 @@ public class TestTopNOperator
         scheduledExecutor.shutdownNow();
     }
 
-    @DataProvider(name = "useWorkProcessorOperator")
-    public static Object[][] useWorkProcessorOperator()
-    {
-        return new Object[][] {{true}, {false}};
-    }
-
-    @Test(dataProvider = "useWorkProcessorOperator")
-    public void testSingleFieldKey(boolean useWorkProcessorOperator)
+    public void testSingleFieldKey()
     {
         List<Page> input = rowPagesBuilder(BIGINT, DOUBLE)
                 .row(1L, 0.1)
@@ -97,7 +89,6 @@ public class TestTopNOperator
                 .build();
 
         OperatorFactory operatorFactory = topNOperatorFactory(
-                useWorkProcessorOperator,
                 ImmutableList.of(BIGINT, DOUBLE),
                 2,
                 ImmutableList.of(0),
@@ -111,8 +102,7 @@ public class TestTopNOperator
         assertOperatorEquals(operatorFactory, driverContext, input, expected);
     }
 
-    @Test(dataProvider = "useWorkProcessorOperator")
-    public void testMultiFieldKey(boolean useWorkProcessorOperator)
+    public void testMultiFieldKey()
     {
         List<Page> input = rowPagesBuilder(VARCHAR, BIGINT)
                 .row("a", 1L)
@@ -127,7 +117,6 @@ public class TestTopNOperator
                 .build();
 
         OperatorFactory operatorFactory = topNOperatorFactory(
-                useWorkProcessorOperator,
                 ImmutableList.of(VARCHAR, BIGINT),
                 3,
                 ImmutableList.of(0, 1),
@@ -142,8 +131,7 @@ public class TestTopNOperator
         assertOperatorEquals(operatorFactory, driverContext, input, expected);
     }
 
-    @Test(dataProvider = "useWorkProcessorOperator")
-    public void testReverseOrder(boolean useWorkProcessorOperator)
+    public void testReverseOrder()
     {
         List<Page> input = rowPagesBuilder(BIGINT, DOUBLE)
                 .row(1L, 0.1)
@@ -159,7 +147,6 @@ public class TestTopNOperator
                 .build();
 
         OperatorFactory operatorFactory = topNOperatorFactory(
-                useWorkProcessorOperator,
                 ImmutableList.of(BIGINT, DOUBLE),
                 2,
                 ImmutableList.of(0),
@@ -173,12 +160,10 @@ public class TestTopNOperator
         assertOperatorEquals(operatorFactory, driverContext, input, expected);
     }
 
-    @Test(dataProvider = "useWorkProcessorOperator")
-    public void testLimitZero(boolean useWorkProcessorOperator)
+    public void testLimitZero()
             throws Exception
     {
         OperatorFactory factory = topNOperatorFactory(
-                useWorkProcessorOperator,
                 ImmutableList.of(BIGINT),
                 0,
                 ImmutableList.of(0),
@@ -192,8 +177,7 @@ public class TestTopNOperator
         }
     }
 
-    @Test(dataProvider = "useWorkProcessorOperator")
-    public void testExceedMemoryLimit(boolean useWorkProcessorOperator)
+    public void testExceedMemoryLimit()
             throws Exception
     {
         List<Page> input = rowPagesBuilder(BIGINT)
@@ -205,7 +189,6 @@ public class TestTopNOperator
                 .addDriverContext();
 
         OperatorFactory operatorFactory = topNOperatorFactory(
-                useWorkProcessorOperator,
                 ImmutableList.of(BIGINT),
                 100,
                 ImmutableList.of(0),
@@ -220,26 +203,17 @@ public class TestTopNOperator
     }
 
     private OperatorFactory topNOperatorFactory(
-            boolean workProcessorOperator,
             List<? extends Type> types,
             int n,
             List<Integer> sortChannels,
             List<SortOrder> sortOrders)
     {
-        OperatorFactory factory = new TopNOperatorFactory(
+        return new TopNOperatorFactory(
                 0,
                 new PlanNodeId("test"),
                 types,
                 n,
                 sortChannels,
                 sortOrders);
-        if (workProcessorOperator) {
-            factory = new TestWorkProcessorOperator.TestWorkProcessorOperatorFactory(
-                    99,
-                    new PlanNodeId("test"),
-                    (WorkProcessorOperatorFactory) factory);
-        }
-
-        return factory;
     }
 }

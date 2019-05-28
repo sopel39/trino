@@ -88,8 +88,8 @@ import io.prestosql.operator.StreamingAggregationOperator.StreamingAggregationOp
 import io.prestosql.operator.TableScanOperator.TableScanOperatorFactory;
 import io.prestosql.operator.TaskContext;
 import io.prestosql.operator.TaskOutputOperator.TaskOutputFactory;
-import io.prestosql.operator.TopNOperator.TopNOperatorFactory;
 import io.prestosql.operator.TopNRowNumberOperator;
+import io.prestosql.operator.TopNWorkProcessorOperator.TopNOperatorFactory;
 import io.prestosql.operator.ValuesOperator.ValuesOperatorFactory;
 import io.prestosql.operator.WindowFunctionDefinition;
 import io.prestosql.operator.WindowOperator.WindowOperatorFactory;
