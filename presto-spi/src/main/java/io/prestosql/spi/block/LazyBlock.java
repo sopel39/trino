@@ -265,7 +265,7 @@ public class LazyBlock
     public Block getLoadedBlock()
     {
         assureLoaded();
-        return block;
+        return block.getLoadedBlock();
     }
 
     private void assureLoaded()
