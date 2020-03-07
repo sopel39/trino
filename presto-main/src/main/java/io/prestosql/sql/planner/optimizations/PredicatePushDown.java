@@ -33,6 +33,7 @@ import io.prestosql.sql.planner.SymbolAllocator;
 import io.prestosql.sql.planner.SymbolsExtractor;
 import io.prestosql.sql.planner.TypeAnalyzer;
 import io.prestosql.sql.planner.TypeProvider;
+import io.prestosql.sql.planner.optimizations.joins.JoinNormalizer;
 import io.prestosql.sql.planner.plan.AggregationNode;
 import io.prestosql.sql.planner.plan.AssignUniqueId;
 import io.prestosql.sql.planner.plan.Assignments;
@@ -58,14 +59,12 @@ import io.prestosql.sql.tree.Expression;
 import io.prestosql.sql.tree.Literal;
 import io.prestosql.sql.tree.LongLiteral;
 import io.prestosql.sql.tree.NodeRef;
-import io.prestosql.sql.tree.NullLiteral;
 import io.prestosql.sql.tree.SymbolReference;
 import io.prestosql.sql.tree.TryExpression;
 import io.prestosql.sql.util.AstUtils;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -90,7 +89,6 @@ import static io.prestosql.sql.planner.iterative.rule.CanonicalizeExpressionRewr
 import static io.prestosql.sql.planner.iterative.rule.UnwrapCastInComparison.unwrapCasts;
 import static io.prestosql.sql.planner.plan.JoinNode.Type.FULL;
 import static io.prestosql.sql.planner.plan.JoinNode.Type.INNER;
-import static io.prestosql.sql.planner.plan.JoinNode.Type.LEFT;
 import static io.prestosql.sql.planner.plan.JoinNode.Type.RIGHT;
 import static io.prestosql.sql.tree.BooleanLiteral.TRUE_LITERAL;
 import static java.util.Objects.requireNonNull;
@@ -143,6 +141,7 @@ public class PredicatePushDown
         private final Session session;
         private final TypeProvider types;
         private final ExpressionEquivalence expressionEquivalence;
+        private final JoinNormalizer joinNormalizer;
         private final boolean dynamicFiltering;
 
         private Rewriter(
@@ -165,6 +164,7 @@ public class PredicatePushDown
             this.session = requireNonNull(session, "session is null");
             this.types = requireNonNull(types, "types is null");
             this.expressionEquivalence = new ExpressionEquivalence(metadata, typeAnalyzer);
+            this.joinNormalizer = new JoinNormalizer(metadata, typeAnalyzer, session, symbolAllocator);
             this.dynamicFiltering = dynamicFiltering;
         }
 
@@ -394,7 +394,7 @@ public class PredicatePushDown
             Expression inheritedPredicate = context.get();
 
             // See if we can rewrite outer joins in terms of a plain inner join
-            node = tryNormalizeToOuterToInnerJoin(node, inheritedPredicate);
+            node = joinNormalizer.tryNormalizeToOuterToInnerJoin(node, inheritedPredicate);
 
             Expression leftEffectivePredicate = effectivePredicateExtractor.extract(session, node.getLeft(), types, typeAnalyzer);
             Expression rightEffectivePredicate = effectivePredicateExtractor.extract(session, node.getRight(), types, typeAnalyzer);
@@ -628,7 +628,7 @@ public class PredicatePushDown
             Expression inheritedPredicate = context.get();
 
             // See if we can rewrite left join in terms of a plain inner join
-            if (node.getType() == SpatialJoinNode.Type.LEFT && canConvertOuterToInner(node.getRight().getOutputSymbols(), inheritedPredicate)) {
+            if (node.getType() == SpatialJoinNode.Type.LEFT && joinNormalizer.canConvertOuterToInner(node.getRight().getOutputSymbols(), inheritedPredicate)) {
                 node = new SpatialJoinNode(node.getId(), SpatialJoinNode.Type.INNER, node.getLeft(), node.getRight(), node.getOutputSymbols(), node.getFilter(), node.getLeftPartitionSymbol(), node.getRightPartitionSymbol(), node.getKdbTree());
             }
 
@@ -1019,54 +1019,6 @@ public class PredicatePushDown
             return combineConjuncts(metadata, builder.build());
         }
 
-        private JoinNode tryNormalizeToOuterToInnerJoin(JoinNode node, Expression inheritedPredicate)
-        {
-            checkArgument(EnumSet.of(INNER, RIGHT, LEFT, FULL).contains(node.getType()), "Unsupported join type: %s", node.getType());
-
-            if (node.getType() == JoinNode.Type.INNER) {
-                return node;
-            }
-
-            if (node.getType() == JoinNode.Type.FULL) {
-                boolean canConvertToLeftJoin = canConvertOuterToInner(node.getLeft().getOutputSymbols(), inheritedPredicate);
-                boolean canConvertToRightJoin = canConvertOuterToInner(node.getRight().getOutputSymbols(), inheritedPredicate);
-                if (!canConvertToLeftJoin && !canConvertToRightJoin) {
-                    return node;
-                }
-                if (canConvertToLeftJoin && canConvertToRightJoin) {
-                    return new JoinNode(node.getId(), INNER, node.getLeft(), node.getRight(), node.getCriteria(), node.getOutputSymbols(), node.getFilter(), node.getLeftHashSymbol(), node.getRightHashSymbol(), node.getDistributionType(), node.isSpillable(), node.getDynamicFilters(), node.getReorderJoinStatsAndCost());
-                }
-                else {
-                    return new JoinNode(node.getId(), canConvertToLeftJoin ? LEFT : RIGHT,
-                            node.getLeft(), node.getRight(), node.getCriteria(), node.getOutputSymbols(), node.getFilter(), node.getLeftHashSymbol(), node.getRightHashSymbol(), node.getDistributionType(), node.isSpillable(), node.getDynamicFilters(), node.getReorderJoinStatsAndCost());
-                }
-            }
-
-            if (node.getType() == JoinNode.Type.LEFT && !canConvertOuterToInner(node.getRight().getOutputSymbols(), inheritedPredicate) ||
-                    node.getType() == JoinNode.Type.RIGHT && !canConvertOuterToInner(node.getLeft().getOutputSymbols(), inheritedPredicate)) {
-                return node;
-            }
-            return new JoinNode(node.getId(), JoinNode.Type.INNER, node.getLeft(), node.getRight(), node.getCriteria(), node.getOutputSymbols(), node.getFilter(), node.getLeftHashSymbol(), node.getRightHashSymbol(), node.getDistributionType(), node.isSpillable(), node.getDynamicFilters(), node.getReorderJoinStatsAndCost());
-        }
-
-        private boolean canConvertOuterToInner(List<Symbol> innerSymbolsForOuterJoin, Expression inheritedPredicate)
-        {
-            Set<Symbol> innerSymbols = ImmutableSet.copyOf(innerSymbolsForOuterJoin);
-            for (Expression conjunct : extractConjuncts(inheritedPredicate)) {
-                if (isDeterministic(conjunct, metadata)) {
-                    // Ignore a conjunct for this test if we cannot deterministically get responses from it
-                    Object response = nullInputEvaluator(innerSymbols, conjunct);
-                    if (response == null || response instanceof NullLiteral || Boolean.FALSE.equals(response)) {
-                        // If there is a single conjunct that returns FALSE or NULL given all NULL inputs for the inner side symbols of an outer join
-                        // then this conjunct removes all effects of the outer join, and effectively turns this into an equivalent of an inner join.
-                        // So, let's just rewrite this join as an INNER join
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
         // Temporary implementation for joins because the SimplifyExpressions optimizers cannot run properly on join clauses
         private Expression simplifyExpression(Expression expression)
         {
@@ -1078,16 +1030,6 @@ public class PredicatePushDown
         private boolean areExpressionsEquivalent(Expression leftExpression, Expression rightExpression)
         {
             return expressionEquivalence.areExpressionsEquivalent(session, leftExpression, rightExpression, types);
-        }
-
-        /**
-         * Evaluates an expression's response to binding the specified input symbols to NULL
-         */
-        private Object nullInputEvaluator(final Collection<Symbol> nullSymbols, Expression expression)
-        {
-            Map<NodeRef<Expression>, Type> expressionTypes = typeAnalyzer.getTypes(session, symbolAllocator.getTypes(), expression);
-            return ExpressionInterpreter.expressionOptimizer(expression, metadata, session, expressionTypes)
-                    .optimize(symbol -> nullSymbols.contains(symbol) ? null : symbol.toSymbolReference());
         }
 
         private boolean joinEqualityExpression(Expression expression, Collection<Symbol> leftSymbols, Collection<Symbol> rightSymbols)
