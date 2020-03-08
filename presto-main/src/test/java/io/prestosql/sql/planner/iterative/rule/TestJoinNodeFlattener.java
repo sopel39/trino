@@ -15,14 +15,17 @@
 package io.prestosql.sql.planner.iterative.rule;
 
 import com.google.common.collect.ImmutableList;
+import io.prestosql.sql.parser.SqlParser;
 import io.prestosql.sql.planner.Plan;
 import io.prestosql.sql.planner.PlanNodeIdAllocator;
 import io.prestosql.sql.planner.Symbol;
+import io.prestosql.sql.planner.TypeAnalyzer;
 import io.prestosql.sql.planner.TypeProvider;
 import io.prestosql.sql.planner.assertions.PlanAssert;
 import io.prestosql.sql.planner.assertions.PlanMatchPattern;
 import io.prestosql.sql.planner.iterative.rule.ReorderJoins.MultiJoinNode;
 import io.prestosql.sql.planner.iterative.rule.test.PlanBuilder;
+import io.prestosql.sql.planner.optimizations.joins.JoinNormalizer;
 import io.prestosql.sql.planner.plan.Assignments;
 import io.prestosql.sql.planner.plan.JoinNode;
 import io.prestosql.sql.planner.plan.JoinNode.EquiJoinClause;
@@ -51,7 +54,6 @@ import static io.prestosql.sql.ExpressionUtils.and;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.node;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.values;
 import static io.prestosql.sql.planner.iterative.Lookup.noLookup;
-import static io.prestosql.sql.planner.iterative.rule.ReorderJoins.MultiJoinNode.toMultiJoinNode;
 import static io.prestosql.sql.planner.plan.JoinNode.Type.FULL;
 import static io.prestosql.sql.planner.plan.JoinNode.Type.INNER;
 import static io.prestosql.sql.planner.plan.JoinNode.Type.LEFT;
@@ -100,7 +102,7 @@ public class TestJoinNodeFlattener
                 ImmutableList.of(equiJoinClause(a1, b1)),
                 ImmutableList.of(a1, b1),
                 Optional.empty());
-        toMultiJoinNode(queryRunner.getMetadata(), outerJoin, noLookup(), planNodeIdAllocator, DEFAULT_JOIN_LIMIT, false);
+        toMultiJoinNode(planNodeIdAllocator, p, outerJoin, DEFAULT_JOIN_LIMIT, false);
     }
 
     @Test
@@ -131,7 +133,7 @@ public class TestJoinNodeFlattener
                 .setSources(leftJoin, valuesC).setFilter(createEqualsExpression(a1, c1))
                 .setOutputSymbols(a1, b1, c1)
                 .build();
-        assertEquals(toMultiJoinNode(queryRunner.getMetadata(), joinNode, noLookup(), planNodeIdAllocator, DEFAULT_JOIN_LIMIT, false), expected);
+        assertEquals(toMultiJoinNode(planNodeIdAllocator, p, joinNode, DEFAULT_JOIN_LIMIT, false), expected);
     }
 
     @Test
@@ -157,7 +159,7 @@ public class TestJoinNodeFlattener
                                 equiJoinClause(a, b))),
                 valuesC,
                 equiJoinClause(d, c));
-        MultiJoinNode actual = toMultiJoinNode(queryRunner.getMetadata(), joinNode, noLookup(), planNodeIdAllocator, DEFAULT_JOIN_LIMIT, true);
+        MultiJoinNode actual = toMultiJoinNode(planNodeIdAllocator, p, joinNode, DEFAULT_JOIN_LIMIT, true);
         assertEquals(actual.getOutputSymbols(), ImmutableList.of(d, c));
         assertEquals(actual.getFilter(), and(createEqualsExpression(a, b), createEqualsExpression(d, c)));
         assertTrue(actual.isPushedProjectionThroughJoin());
@@ -203,7 +205,7 @@ public class TestJoinNodeFlattener
                                 equiJoinClause(a, b))),
                 valuesC,
                 equiJoinClause(d, c));
-        MultiJoinNode actual = toMultiJoinNode(queryRunner.getMetadata(), joinNode, noLookup(), planNodeIdAllocator, DEFAULT_JOIN_LIMIT, true);
+        MultiJoinNode actual = toMultiJoinNode(planNodeIdAllocator, p, joinNode, DEFAULT_JOIN_LIMIT, true);
         assertEquals(actual.getOutputSymbols(), ImmutableList.of(d, c));
         assertEquals(actual.getFilter(), createEqualsExpression(d, c));
         assertFalse(actual.isPushedProjectionThroughJoin());
@@ -256,7 +258,7 @@ public class TestJoinNodeFlattener
                 .setFilter(and(createEqualsExpression(b1, c1), createEqualsExpression(a1, b1)))
                 .setOutputSymbols(a1, b1)
                 .build();
-        assertEquals(toMultiJoinNode(queryRunner.getMetadata(), joinNode, noLookup(), planNodeIdAllocator, DEFAULT_JOIN_LIMIT, false), expected);
+        assertEquals(toMultiJoinNode(planNodeIdAllocator, p, joinNode, DEFAULT_JOIN_LIMIT, false), expected);
     }
 
     @Test
@@ -302,7 +304,7 @@ public class TestJoinNodeFlattener
                 and(new ComparisonExpression(EQUAL, b1.toSymbolReference(), c1.toSymbolReference()), new ComparisonExpression(EQUAL, a1.toSymbolReference(), b1.toSymbolReference()), bcFilter, abcFilter),
                 ImmutableList.of(a1, b1, b2, c1, c2),
                 false);
-        assertEquals(toMultiJoinNode(queryRunner.getMetadata(), joinNode, noLookup(), planNodeIdAllocator, DEFAULT_JOIN_LIMIT, false), expected);
+        assertEquals(toMultiJoinNode(planNodeIdAllocator, p, joinNode, DEFAULT_JOIN_LIMIT, false), expected);
     }
 
     @Test
@@ -365,7 +367,7 @@ public class TestJoinNodeFlattener
                 .setFilter(and(createEqualsExpression(a1, b1), createEqualsExpression(a1, c1), createEqualsExpression(d1, e1), createEqualsExpression(d2, e2), createEqualsExpression(b1, e1)))
                 .setOutputSymbols(a1, b1, c1, d1, d2, e1, e2)
                 .build();
-        assertEquals(toMultiJoinNode(queryRunner.getMetadata(), joinNode, noLookup(), planNodeIdAllocator, 5, false), expected);
+        assertEquals(toMultiJoinNode(planNodeIdAllocator, p, joinNode, 5, false), expected);
     }
 
     @Test
@@ -430,7 +432,23 @@ public class TestJoinNodeFlattener
                 .setFilter(and(createEqualsExpression(a1, c1), createEqualsExpression(b1, e1)))
                 .setOutputSymbols(a1, b1, c1, d1, d2, e1, e2)
                 .build();
-        assertEquals(toMultiJoinNode(queryRunner.getMetadata(), joinNode, noLookup(), planNodeIdAllocator, 2, false), expected);
+        assertEquals(toMultiJoinNode(planNodeIdAllocator, p, joinNode, 2, false), expected);
+    }
+
+    private MultiJoinNode toMultiJoinNode(PlanNodeIdAllocator planNodeIdAllocator, PlanBuilder planBuilder, JoinNode joinNode, int joinLimit, boolean pushProjectionsThroughJoin)
+    {
+        return ReorderJoins.MultiJoinNode.toMultiJoinNode(
+                queryRunner.getMetadata(),
+                new JoinNormalizer(
+                        queryRunner.getMetadata(),
+                        new TypeAnalyzer(new SqlParser(), queryRunner.getMetadata()),
+                        planBuilder.getTypes(),
+                        testSessionBuilder().build()),
+                joinNode,
+                noLookup(),
+                planNodeIdAllocator,
+                joinLimit,
+                pushProjectionsThroughJoin);
     }
 
     private ComparisonExpression createEqualsExpression(Symbol left, Symbol right)

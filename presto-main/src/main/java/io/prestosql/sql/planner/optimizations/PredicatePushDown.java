@@ -164,7 +164,7 @@ public class PredicatePushDown
             this.session = requireNonNull(session, "session is null");
             this.types = requireNonNull(types, "types is null");
             this.expressionEquivalence = new ExpressionEquivalence(metadata, typeAnalyzer);
-            this.joinNormalizer = new JoinNormalizer(metadata, typeAnalyzer, session, symbolAllocator);
+            this.joinNormalizer = new JoinNormalizer(metadata, typeAnalyzer, symbolAllocator.getTypes(), session);
             this.dynamicFiltering = dynamicFiltering;
         }
 

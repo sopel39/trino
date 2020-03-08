@@ -22,8 +22,10 @@ import io.prestosql.metadata.Metadata;
 import io.prestosql.spi.type.Type;
 import io.prestosql.sql.analyzer.FeaturesConfig.JoinDistributionType;
 import io.prestosql.sql.analyzer.FeaturesConfig.JoinReorderingStrategy;
+import io.prestosql.sql.parser.SqlParser;
 import io.prestosql.sql.planner.FunctionCallBuilder;
 import io.prestosql.sql.planner.Symbol;
+import io.prestosql.sql.planner.TypeAnalyzer;
 import io.prestosql.sql.planner.assertions.PlanMatchPattern;
 import io.prestosql.sql.planner.iterative.rule.test.RuleAssert;
 import io.prestosql.sql.planner.iterative.rule.test.RuleTester;
@@ -665,6 +667,6 @@ public class TestReorderJoins
 
     private RuleAssert assertReorderJoins()
     {
-        return tester.assertThat(new ReorderJoins(metadata, new CostComparator(1, 1, 1)));
+        return tester.assertThat(new ReorderJoins(metadata, new TypeAnalyzer(new SqlParser(), metadata), new CostComparator(1, 1, 1)));
     }
 }

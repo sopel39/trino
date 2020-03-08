@@ -19,8 +19,8 @@ import io.prestosql.metadata.Metadata;
 import io.prestosql.spi.type.Type;
 import io.prestosql.sql.planner.ExpressionInterpreter;
 import io.prestosql.sql.planner.Symbol;
-import io.prestosql.sql.planner.SymbolAllocator;
 import io.prestosql.sql.planner.TypeAnalyzer;
+import io.prestosql.sql.planner.TypeProvider;
 import io.prestosql.sql.planner.plan.JoinNode;
 import io.prestosql.sql.tree.Expression;
 import io.prestosql.sql.tree.NodeRef;
@@ -45,15 +45,15 @@ public class JoinNormalizer
 {
     private final Metadata metadata;
     private final TypeAnalyzer typeAnalyzer;
+    private final TypeProvider typeProvider;
     private final Session session;
-    private final SymbolAllocator symbolAllocator;
 
-    public JoinNormalizer(Metadata metadata, TypeAnalyzer typeAnalyzer, Session session, SymbolAllocator symbolAllocator)
+    public JoinNormalizer(Metadata metadata, TypeAnalyzer typeAnalyzer, TypeProvider typeProvider, Session session)
     {
         this.metadata = requireNonNull(metadata, "metadata is null");
         this.typeAnalyzer = requireNonNull(typeAnalyzer, "typeAnalyzer is null");
+        this.typeProvider = requireNonNull(typeProvider, "typeProvider is null");
         this.session = requireNonNull(session, "session is null");
-        this.symbolAllocator = requireNonNull(symbolAllocator, "symbolAllocator is null");
     }
 
     public JoinNode tryNormalizeToOuterToInnerJoin(JoinNode node, Expression inheritedPredicate)
@@ -109,7 +109,7 @@ public class JoinNormalizer
      */
     private Object nullInputEvaluator(final Collection<Symbol> nullSymbols, Expression expression)
     {
-        Map<NodeRef<Expression>, Type> expressionTypes = typeAnalyzer.getTypes(session, symbolAllocator.getTypes(), expression);
+        Map<NodeRef<Expression>, Type> expressionTypes = typeAnalyzer.getTypes(session, typeProvider, expression);
         return ExpressionInterpreter.expressionOptimizer(expression, metadata, session, expressionTypes)
                 .optimize(symbol -> nullSymbols.contains(symbol) ? null : symbol.toSymbolReference());
     }

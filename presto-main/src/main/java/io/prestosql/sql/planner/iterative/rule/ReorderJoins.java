@@ -37,8 +37,10 @@ import io.prestosql.sql.planner.EqualityInference;
 import io.prestosql.sql.planner.PlanNodeIdAllocator;
 import io.prestosql.sql.planner.Symbol;
 import io.prestosql.sql.planner.SymbolsExtractor;
+import io.prestosql.sql.planner.TypeAnalyzer;
 import io.prestosql.sql.planner.iterative.Lookup;
 import io.prestosql.sql.planner.iterative.Rule;
+import io.prestosql.sql.planner.optimizations.joins.JoinNormalizer;
 import io.prestosql.sql.planner.plan.FilterNode;
 import io.prestosql.sql.planner.plan.JoinNode;
 import io.prestosql.sql.planner.plan.JoinNode.DistributionType;
@@ -103,11 +105,13 @@ public class ReorderJoins
     private final Pattern<JoinNode> pattern;
 
     private final Metadata metadata;
+    private final TypeAnalyzer typeAnalyzer;
     private final CostComparator costComparator;
 
-    public ReorderJoins(Metadata metadata, CostComparator costComparator)
+    public ReorderJoins(Metadata metadata, TypeAnalyzer typeAnalyzer, CostComparator costComparator)
     {
         this.metadata = requireNonNull(metadata, "metadata is null");
+        this.typeAnalyzer = requireNonNull(typeAnalyzer, "typeAnalyzer is null");
         this.costComparator = requireNonNull(costComparator, "costComparator is null");
         this.pattern = join().matching(
                 joinNode -> !joinNode.getDistributionType().isPresent()
@@ -130,8 +134,14 @@ public class ReorderJoins
     @Override
     public Result apply(JoinNode joinNode, Captures captures, Context context)
     {
+        JoinNormalizer joinNormalizer = new JoinNormalizer(
+                metadata,
+                typeAnalyzer,
+                context.getSymbolAllocator().getTypes(),
+                context.getSession());
+
         // try reorder joins with projection pushdown first
-        MultiJoinNode multiJoinNode = toMultiJoinNode(metadata, joinNode, context, true);
+        MultiJoinNode multiJoinNode = toMultiJoinNode(metadata, joinNormalizer, joinNode, context, true);
         JoinEnumerationResult resultWithProjectionPushdown = chooseJoinOrder(multiJoinNode, context);
         if (!resultWithProjectionPushdown.getPlanNode().isPresent()) {
             return Result.empty();
@@ -142,7 +152,7 @@ public class ReorderJoins
         }
 
         // try reorder joins without projection pushdown
-        multiJoinNode = toMultiJoinNode(metadata, joinNode, context, false);
+        multiJoinNode = toMultiJoinNode(metadata, joinNormalizer, joinNode, context, false);
         JoinEnumerationResult resultWithoutProjectionPushdown = chooseJoinOrder(multiJoinNode, context);
         if (!resultWithoutProjectionPushdown.getPlanNode().isPresent()
                 || costComparator.compare(context.getSession(), resultWithProjectionPushdown.cost, resultWithoutProjectionPushdown.cost) < 0) {
@@ -544,15 +554,15 @@ public class ReorderJoins
                     && this.pushedProjectionThroughJoin == other.pushedProjectionThroughJoin;
         }
 
-        static MultiJoinNode toMultiJoinNode(Metadata metadata, JoinNode joinNode, Context context, boolean pushProjectionsThroughJoin)
+        static MultiJoinNode toMultiJoinNode(Metadata metadata, JoinNormalizer joinNormalizer, JoinNode joinNode, Context context, boolean pushProjectionsThroughJoin)
         {
-            return toMultiJoinNode(metadata, joinNode, context.getLookup(), context.getIdAllocator(), getMaxReorderedJoins(context.getSession()), pushProjectionsThroughJoin);
+            return toMultiJoinNode(metadata, joinNormalizer, joinNode, context.getLookup(), context.getIdAllocator(), getMaxReorderedJoins(context.getSession()), pushProjectionsThroughJoin);
         }
 
-        static MultiJoinNode toMultiJoinNode(Metadata metadata, JoinNode joinNode, Lookup lookup, PlanNodeIdAllocator planNodeIdAllocator, int joinLimit, boolean pushProjectionsThroughJoin)
+        static MultiJoinNode toMultiJoinNode(Metadata metadata, JoinNormalizer joinNormalizer, JoinNode joinNode, Lookup lookup, PlanNodeIdAllocator planNodeIdAllocator, int joinLimit, boolean pushProjectionsThroughJoin)
         {
             // the number of sources is the number of joins + 1
-            return new JoinNodeFlattener(metadata, joinNode, lookup, planNodeIdAllocator, joinLimit + 1, pushProjectionsThroughJoin).toMultiJoinNode();
+            return new JoinNodeFlattener(metadata, joinNormalizer, joinNode, lookup, planNodeIdAllocator, joinLimit + 1, pushProjectionsThroughJoin).toMultiJoinNode();
         }
 
         private static class JoinNodeFlattener
@@ -560,6 +570,7 @@ public class ReorderJoins
             private final Metadata metadata;
             private final Lookup lookup;
             private final PlanNodeIdAllocator planNodeIdAllocator;
+            private final JoinNormalizer joinNormalizer;
 
             private final LinkedHashSet<PlanNode> sources = new LinkedHashSet<>();
             private final List<Expression> filters = new ArrayList<>();
@@ -569,7 +580,7 @@ public class ReorderJoins
             // if projection was pushed through join during join graph flattening?
             private boolean pushedProjectionThroughJoin;
 
-            JoinNodeFlattener(Metadata metadata, JoinNode node, Lookup lookup, PlanNodeIdAllocator planNodeIdAllocator, int sourceLimit, boolean pushProjectionsThroughJoin)
+            JoinNodeFlattener(Metadata metadata, JoinNormalizer joinNormalizer, JoinNode node, Lookup lookup, PlanNodeIdAllocator planNodeIdAllocator, int sourceLimit, boolean pushProjectionsThroughJoin)
             {
                 this.metadata = requireNonNull(metadata, "metadata is null");
                 requireNonNull(node, "node is null");
@@ -577,6 +588,7 @@ public class ReorderJoins
                 this.outputSymbols = node.getOutputSymbols();
                 this.lookup = requireNonNull(lookup, "lookup is null");
                 this.planNodeIdAllocator = requireNonNull(planNodeIdAllocator, "planNodeIdAllocator is null");
+                this.joinNormalizer = requireNonNull(joinNormalizer, "joinNormalizer is null");
                 this.pushProjectionsThroughJoin = pushProjectionsThroughJoin;
                 flattenNode(node, sourceLimit);
             }
@@ -609,6 +621,15 @@ public class ReorderJoins
                 }
 
                 JoinNode joinNode = (JoinNode) resolved;
+
+                if (joinNode.getType() != INNER) {
+                    JoinNode normalizedJoinNode = joinNormalizer.tryNormalizeToOuterToInnerJoin(joinNode, combineConjuncts(metadata, filters));
+                    if (normalizedJoinNode.getType() == INNER) {
+                        flattenNode(normalizedJoinNode, limit);
+                        return;
+                    }
+                }
+
                 if (joinNode.getType() != INNER || !isDeterministic(joinNode.getFilter().orElse(TRUE_LITERAL), metadata) || joinNode.getDistributionType().isPresent()) {
                     sources.add(node);
                     return;
