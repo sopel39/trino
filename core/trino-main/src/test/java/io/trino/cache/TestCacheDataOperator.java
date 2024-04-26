@@ -219,8 +219,12 @@ public class TestCacheDataOperator
                 .addPipelineContext(0, true, true, false)
                 .addDriverContext();
 
+<<<<<<< HEAD
         Split split = new Split(TEST_CATALOG_HANDLE, createRemoteSplit(), Optional.of(splitId), true);
         try (Driver driver = cacheDriverFactory.createDriver(driverContext, Optional.of(new ScheduledSplit(0, planNodeIdAllocator.getNextId(), split)))) {
+=======
+        try (Driver driver = cacheDriverFactory.createDriver(driverContext, new ScheduledSplit(0, planNodeIdAllocator.getNextId(), split), Optional.of(splitId)).driver().get()) {
+>>>>>>> 8a6d39c0156 (Wait for splits)
             assertThat(driver.getDriverContext().getCacheDriverContext()).isEmpty();
         }
         assertThat(cacheDriverFactory.getCacheMetrics().getSplitCachedCount()).isEqualTo(MIN_PROCESSED_SPLITS);
@@ -243,8 +247,12 @@ public class TestCacheDataOperator
             DriverContext driverContext = createTaskContext(Executors.newSingleThreadExecutor(), Executors.newScheduledThreadPool(1), TEST_SESSION)
                     .addPipelineContext(0, true, true, false)
                     .addDriverContext();
+<<<<<<< HEAD
             Split split = new Split(TEST_CATALOG_HANDLE, createRemoteSplit(), Optional.of(splitId), true);
             try (Driver driver = cacheDriverFactory.createDriver(driverContext, Optional.of(new ScheduledSplit(0, planNodeIdAllocator.getNextId(), split)))) {
+=======
+            try (Driver driver = cacheDriverFactory.createDriver(driverContext, new ScheduledSplit(0, planNodeIdAllocator.getNextId(), split), Optional.of(splitId)).driver().get()) {
+>>>>>>> 8a6d39c0156 (Wait for splits)
                 driver.process(new Duration(10.0, TimeUnit.SECONDS), 100);
                 assertThat(driver.getDriverContext().getCacheDriverContext()).isPresent();
             }

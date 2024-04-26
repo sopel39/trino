@@ -235,8 +235,13 @@ public class IndexLoader
         Page indexKeyTuple = updateRequest.getPage().getRegion(0, 1);
 
         PageBuffer pageBuffer = new PageBuffer(100);
+<<<<<<< HEAD
         OperatorDriverFactory driverFactory = indexBuildDriverFactoryProvider.createStreaming(pageBuffer, indexKeyTuple);
         Driver driver = driverFactory.createDriver(pipelineContext.addDriverContext(), Optional.empty());
+=======
+        DriverFactory driverFactory = indexBuildDriverFactoryProvider.createStreaming(pageBuffer, indexKeyTuple);
+        Driver driver = driverFactory.createDriver(pipelineContext.addDriverContext()).driver().get();
+>>>>>>> 8a6d39c0156 (Wait for splits)
 
         PageRecordSet pageRecordSet = new PageRecordSet(keyTypes, indexKeyTuple);
         PlanNodeId planNodeId = driverFactory.getSourceId().get();
@@ -330,7 +335,11 @@ public class IndexLoader
             UnloadedIndexKeyRecordSet recordSetForLookupSource = new UnloadedIndexKeyRecordSet(pipelineContext.getSession(), indexSnapshotReference.get(), lookupSourceInputChannels, indexTypes, requests, hashStrategyCompiler);
 
             // Drive index lookup to produce the output (landing in indexSnapshotBuilder)
+<<<<<<< HEAD
             try (Driver driver = driverFactory.createDriver(pipelineContext.addDriverContext(), Optional.empty())) {
+=======
+            try (Driver driver = driverFactory.createDriver(pipelineContext.addDriverContext()).driver().get()) {
+>>>>>>> 8a6d39c0156 (Wait for splits)
                 PlanNodeId sourcePlanNodeId = driverFactory.getSourceId().get();
                 ScheduledSplit split = new ScheduledSplit(0, sourcePlanNodeId, new Split(INDEX_CATALOG_HANDLE, new IndexSplit(recordSetForLookupSource)));
                 driver.updateSplitAssignment(new SplitAssignment(sourcePlanNodeId, ImmutableSet.of(split), true));

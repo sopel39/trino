@@ -37,6 +37,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import static io.trino.memory.context.AggregatedMemoryContext.newRootAggregatedMemoryContext;
@@ -165,6 +166,12 @@ public class ConcurrentCacheManager
         {
             this.signature = requireNonNull(signature, "signature is null");
             this.signatureHash = canonicalizePlanSignature(signature).hashCode();
+        }
+
+        @Override
+        public CompletableFuture<Void> waitForPages(CacheSplitId splitId, TupleDomain<CacheColumnId> predicate, TupleDomain<CacheColumnId> unenforcedPredicate)
+        {
+            return getSplitCache(splitId).waitForPages(splitId, predicate, unenforcedPredicate);
         }
 
         @Override

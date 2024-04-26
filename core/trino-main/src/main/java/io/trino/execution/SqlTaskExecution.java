@@ -39,6 +39,11 @@ import io.trino.operator.DriverContext;
 import io.trino.operator.DriverFactory;
 import io.trino.operator.DriverStats;
 import io.trino.operator.PipelineContext;
+<<<<<<< HEAD
+=======
+import io.trino.operator.SplitDriverFactory;
+import io.trino.operator.SplitDriverFactory.DriverWithFuture;
+>>>>>>> 8a6d39c0156 (Wait for splits)
 import io.trino.operator.TaskContext;
 import io.trino.spi.SplitWeight;
 import io.trino.spi.TrinoException;
@@ -656,15 +661,18 @@ public class SqlTaskExecution
          * @return the created {@link Driver}, or <code>null</code> if the driver factory is already closed because the task is terminating
          */
         @Nullable
-        public Driver createDriver(DriverContext driverContext, @Nullable ScheduledSplit partitionedSplit)
+        public DriverWithFuture createDriver(DriverContext driverContext, @Nullable ScheduledSplit partitionedSplit)
         {
             // Attempt to increment the driver count eagerly, but skip driver creation if the task is already terminating or done
             if (!driverAndTaskTerminationTracker.tryCreateNewDriver()) {
                 return null;
             }
-            Driver driver;
+            DriverWithFuture driverWithFuture;
             try {
-                driver = driverFactory.createDriver(driverContext, Optional.ofNullable(partitionedSplit));
+                driverWithFuture = driverFactory.createDriver(driverContext, Optional.ofNullable(partitionedSplit));
+                if (driverWithFuture.driver().isEmpty()) {
+                    return driverWithFuture;
+                }
                 Span.fromContext(Context.current()).addEvent("driver-created");
             }
             catch (Throwable t) {
@@ -683,6 +691,7 @@ public class SqlTaskExecution
             }
 
             // register driver destroyed listener to detect when termination completes
+            Driver driver = driverWithFuture.driver().get();
             driver.getDestroyedFuture().addListener(driverAndTaskTerminationTracker::driverDestroyed, directExecutor());
             try {
                 if (partitionedSplit != null) {
@@ -699,7 +708,7 @@ public class SqlTaskExecution
                     scheduleSplits();
                 }
 
-                return driver;
+                return driverWithFuture;
             }
             catch (Throwable failure) {
                 try {
@@ -876,12 +885,15 @@ public class SqlTaskExecution
                 }
 
                 if (this.driver == null) {
-                    this.driver = driverSplitRunnerFactory.createDriver(driverContext, partitionedSplit);
-                    // Termination has begun, mark the runner as closed and return
-                    if (this.driver == null) {
+                    DriverWithFuture driverWithFuture = driverSplitRunnerFactory.createDriver(driverContext, partitionedSplit);
+                    if (driverWithFuture == null) {
                         closed = true;
                         return immediateVoidFuture();
                     }
+                    if (driverWithFuture.driver().isEmpty()) {
+                        return driverWithFuture.future();
+                    }
+                    this.driver = driverWithFuture.driver().get();
                 }
 
                 driver = this.driver;

@@ -824,7 +824,11 @@ public class PlanTester
                 }
                 else {
                     DriverContext driverContext = taskContext.addPipelineContext(driverFactory.getPipelineId(), driverFactory.isInputDriver(), driverFactory.isOutputDriver(), false).addDriverContext();
+<<<<<<< HEAD
                     Driver driver = driverFactory.createDriver(driverContext, Optional.empty());
+=======
+                    Driver driver = driverFactory.createDriver(driverContext).driver().get();
+>>>>>>> 8a6d39c0156 (Wait for splits)
                     drivers.add(driver);
                 }
             }
@@ -838,7 +842,7 @@ public class PlanTester
             boolean partitioned = partitionedSources.contains(driverFactory.getSourceId().orElseThrow());
             for (ScheduledSplit split : splitAssignment.getSplits()) {
                 DriverContext driverContext = taskContext.addPipelineContext(driverFactory.getPipelineId(), driverFactory.isInputDriver(), driverFactory.isOutputDriver(), partitioned).addDriverContext();
-                Driver driver = driverFactory.createDriver(driverContext, Optional.of(split));
+                Driver driver = driverFactory.createDriver(driverContext, Optional.of(split)).driver().get();
                 driver.updateSplitAssignment(new SplitAssignment(split.getPlanNodeId(), ImmutableSet.of(split), true));
                 drivers.add(driver);
             }

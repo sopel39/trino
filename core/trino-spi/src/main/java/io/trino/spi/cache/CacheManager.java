@@ -19,6 +19,7 @@ import io.trino.spi.predicate.TupleDomain;
 
 import java.io.Closeable;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 public interface CacheManager
 {
@@ -41,6 +42,8 @@ public interface CacheManager
     interface SplitCache
             extends Closeable
     {
+        CompletableFuture<Void> waitForPages(CacheSplitId splitId, TupleDomain<CacheColumnId> predicate, TupleDomain<CacheColumnId> unenforcedPredicate);
+
         /**
          * @param predicate Predicate that should be enforced on cached rows.
          * Output of `cachedSplitA` can be used to derive output of matching `cachedSplitB`

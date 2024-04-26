@@ -19,15 +19,20 @@ import com.google.common.collect.BiMap;
 import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.json.JsonCodec;
 import io.airlift.units.Duration;
 import io.trino.Session;
 import io.trino.cache.CommonPlanAdaptation.PlanSignatureWithPredicate;
 import io.trino.execution.ScheduledSplit;
 import io.trino.metadata.TableHandle;
-import io.trino.operator.Driver;
 import io.trino.operator.DriverContext;
 import io.trino.operator.DriverFactory;
+<<<<<<< HEAD
+=======
+import io.trino.operator.SplitDriverFactory.DriverWithFuture;
+import io.trino.operator.dynamicfiltering.DynamicRowFilteringPageSourceProvider;
+>>>>>>> 8a6d39c0156 (Wait for splits)
 import io.trino.plugin.base.cache.CacheUtils;
 import io.trino.plugin.base.metrics.TDigestHistogram;
 import io.trino.spi.TrinoException;
@@ -57,6 +62,8 @@ import java.util.stream.IntStream;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
+import static com.google.common.util.concurrent.Futures.immediateVoidFuture;
+import static io.airlift.concurrent.MoreFutures.toListenableFuture;
 import static io.trino.cache.CacheCommonSubqueries.LOAD_PAGES_ALTERNATIVE;
 import static io.trino.cache.CacheCommonSubqueries.ORIGINAL_PLAN_ALTERNATIVE;
 import static io.trino.cache.CacheCommonSubqueries.STORE_PAGES_ALTERNATIVE;
@@ -135,8 +142,12 @@ public class CacheDriverFactory
         this.cacheStats = requireNonNull(cacheStats, "cacheStats is null");
     }
 
+<<<<<<< HEAD
     @Override
     public int getPipelineId()
+=======
+    public DriverWithFuture createDriver(DriverContext driverContext, ScheduledSplit split, Optional<CacheSplitId> cacheSplitIdOptional)
+>>>>>>> 8a6d39c0156 (Wait for splits)
     {
         return pipelineId;
     }
@@ -168,7 +179,14 @@ public class CacheDriverFactory
         DriverFactoryWithCacheContext driverFactory;
         long lookupStartNanos = ticker.read();
         try {
+<<<<<<< HEAD
             driverFactory = chooseDriverFactory(split);
+=======
+            driverFactory = chooseDriverFactory(split, cacheSplitIdOptional);
+            if (driverFactory.factory().isEmpty()) {
+                return new DriverWithFuture(Optional.empty(), driverFactory.pagesFuture());
+            }
+>>>>>>> 8a6d39c0156 (Wait for splits)
         }
         catch (Throwable t) {
             throw new TrinoException(GENERIC_INTERNAL_ERROR, "SUBQUERY CACHE: create driver exception", t);
@@ -180,7 +198,11 @@ public class CacheDriverFactory
                 .map(context -> context.withMetrics(new Metrics(ImmutableMap.of(
                         "Cache lookup time (ms)", TDigestHistogram.fromValue(new Duration(lookupDurationNanos, NANOSECONDS).convertTo(MILLISECONDS).getValue())))))
                 .ifPresent(driverContext::setCacheDriverContext);
+<<<<<<< HEAD
         return driverFactory.factory().createDriver(driverContext, optionalSplit);
+=======
+        return driverFactory.factory().get().createDriver(driverContext);
+>>>>>>> 8a6d39c0156 (Wait for splits)
     }
 
     @Override
@@ -215,12 +237,12 @@ public class CacheDriverFactory
         if (cacheSplitIdOptional.isEmpty()) {
             // no split id, fallback to original plan
             cacheStats.recordMissingSplitId();
-            return new DriverFactoryWithCacheContext(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE), Optional.empty());
+            return new DriverFactoryWithCacheContext(Optional.of(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE)), Optional.empty(), immediateVoidFuture());
         }
         if (!split.getSplit().isSplitAddressEnforced()) {
             // failed to schedule split on the preferred node, fallback to original plan
             cacheStats.recordSplitFailoverHappened();
-            return new DriverFactoryWithCacheContext(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE), Optional.empty());
+            return new DriverFactoryWithCacheContext(Optional.of(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE)), Optional.empty(), immediateVoidFuture());
         }
         CacheSplitId splitId = cacheSplitIdOptional.get();
 
@@ -238,27 +260,56 @@ public class CacheDriverFactory
 
         // skip caching of completely filtered out splits
         if (enforcedPredicate.isNone() || unenforcedPredicate.isNone()) {
-            return new DriverFactoryWithCacheContext(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE), Optional.empty());
+            return new DriverFactoryWithCacheContext(Optional.of(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE)), Optional.empty(), immediateVoidFuture());
         }
 
         // skip caching if unenforced predicate becomes too big,
         // because large predicates are not likely to be reused in other subqueries
         if (getTupleDomainValueCount(unenforcedPredicate) > MAX_UNENFORCED_PREDICATE_VALUE_COUNT) {
             cacheStats.recordPredicateTooBig();
-            return new DriverFactoryWithCacheContext(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE), Optional.empty());
+            return new DriverFactoryWithCacheContext(Optional.of(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE)), Optional.empty(), immediateVoidFuture());
         }
 
         ProjectPredicate projectedEnforcedPredicate = projectPredicate(enforcedPredicate);
         ProjectPredicate projectedUnenforcedPredicate = projectPredicate(unenforcedPredicate);
         CacheSplitId splitIdWithPredicates = appendRemainingPredicates(splitId, projectedEnforcedPredicate, projectedUnenforcedPredicate);
 
+        ListenableFuture<Void> pagesFuture = toListenableFuture(splitCache.waitForPages(splitIdWithPredicates, projectedEnforcedPredicate.predicate(), projectedUnenforcedPredicate.predicate()));
+        if (!pagesFuture.isDone()) {
+            return new DriverFactoryWithCacheContext(Optional.empty(), Optional.empty(), pagesFuture);
+        }
+
         // load data from cache
         Optional<ConnectorPageSource> pageSource = splitCache.loadPages(splitIdWithPredicates, projectedEnforcedPredicate.predicate(), projectedUnenforcedPredicate.predicate());
+<<<<<<< HEAD
+=======
+        if (pageSource.isEmpty()
+                && (!projectedUnenforcedPredicate.predicate().isAll() || projectedUnenforcedPredicate.remainingPredicate.isPresent())) {
+            // load page source as fallback with no unenforced predicate
+            CacheSplitId fallbackSplitId = appendRemainingPredicates(splitId, projectedEnforcedPredicate, new ProjectPredicate(TupleDomain.all(), Optional.empty()));
+            pagesFuture = toListenableFuture(splitCache.waitForPages(fallbackSplitId, projectedEnforcedPredicate.predicate(), TupleDomain.all()));
+            if (!pagesFuture.isDone()) {
+                return new DriverFactoryWithCacheContext(Optional.empty(), Optional.empty(), pagesFuture);
+            }
+            pageSource = splitCache.loadPages(fallbackSplitId, projectedEnforcedPredicate.predicate(), TupleDomain.all());
+            if (pageSource.isPresent()) {
+                // apply dynamic row filtering
+                Map<ColumnHandle, Integer> channelIndexes = commonColumnHandles.entrySet().stream()
+                        // Cached subplan might not contain all table scan columns
+                        .filter(entry -> projectedColumns.containsKey(entry.getValue()))
+                        .collect(toImmutableMap(Map.Entry::getKey, entry -> projectedColumns.get(entry.getValue())));
+                checkState(channelIndexes.keySet().containsAll(dynamicFilter.getColumnsCovered()), "Cached pageSource does not contain all columns required by dynamic filter");
+                pageSource = Optional.of(dynamicRowFilteringPageSourceProvider.createPageSource(pageSource.get(), session, projectedColumns.size(), channelIndexes, dynamicFilter));
+            }
+        }
+
+>>>>>>> 8a6d39c0156 (Wait for splits)
         if (pageSource.isPresent()) {
             cacheStats.recordCacheHit();
             return new DriverFactoryWithCacheContext(
-                    alternatives.get(LOAD_PAGES_ALTERNATIVE),
-                    Optional.of(new CacheDriverContext(pageSource, Optional.empty(), dynamicFilter, cacheMetrics, cacheStats, Metrics.EMPTY)));
+                    Optional.of(alternatives.get(LOAD_PAGES_ALTERNATIVE)),
+                    Optional.of(new CacheDriverContext(pageSource, Optional.empty(), dynamicFilter, cacheMetrics, cacheStats, Metrics.EMPTY)),
+                    immediateVoidFuture());
         }
         else {
             cacheStats.recordCacheMiss();
@@ -272,8 +323,9 @@ public class CacheDriverFactory
             Optional<ConnectorPageSink> pageSink = splitCache.storePages(splitIdWithPredicates, projectedEnforcedPredicate.predicate(), projectedUnenforcedPredicate.predicate());
             if (pageSink.isPresent()) {
                 return new DriverFactoryWithCacheContext(
-                        alternatives.get(STORE_PAGES_ALTERNATIVE),
-                        Optional.of(new CacheDriverContext(Optional.empty(), pageSink, dynamicFilter, cacheMetrics, cacheStats, Metrics.EMPTY)));
+                        Optional.of(alternatives.get(STORE_PAGES_ALTERNATIVE)),
+                        Optional.of(new CacheDriverContext(Optional.empty(), pageSink, dynamicFilter, cacheMetrics, cacheStats, Metrics.EMPTY)),
+                        immediateVoidFuture());
             }
             else {
                 cacheStats.recordSplitRejected();
@@ -284,10 +336,10 @@ public class CacheDriverFactory
         }
 
         // fallback to original subplan
-        return new DriverFactoryWithCacheContext(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE), Optional.empty());
+        return new DriverFactoryWithCacheContext(Optional.of(alternatives.get(ORIGINAL_PLAN_ALTERNATIVE)), Optional.empty(), immediateVoidFuture());
     }
 
-    private record DriverFactoryWithCacheContext(DriverFactory factory, Optional<CacheDriverContext> context) {}
+    private record DriverFactoryWithCacheContext(Optional<DriverFactory> factory, Optional<CacheDriverContext> context, ListenableFuture<Void> pagesFuture) {}
 
     private TupleDomain<CacheColumnId> pruneEnforcedPredicate(ScheduledSplit split)
     {

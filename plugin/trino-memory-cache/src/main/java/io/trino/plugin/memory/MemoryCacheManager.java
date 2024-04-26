@@ -164,6 +164,19 @@ public class MemoryCacheManager
         return runWithLock(lock.readLock(), splitCache::size);
     }
 
+    private CompletableFuture<Void> waitForPages(SignatureIds ids, CacheSplitId splitId, TupleDomain<CacheColumnId> predicate, TupleDomain<CacheColumnId> unenforcedPredicate)
+    {
+        checkPredicates(ids, predicate, unenforcedPredicate);
+        return getChannelsWithSameStoreId(ids, splitId, predicate, unenforcedPredicate, false).values().stream()
+                // find store id that contain channels for all columns
+                .filter(channels -> channels.size() == ids.columnIds().length)
+                .findAny()
+                .map(channels -> CompletableFuture.allOf(channels.stream()
+                        .map(Channel::getCompleted)
+                        .toArray(CompletableFuture[]::new)))
+                .orElse(completedFuture(null));
+    }
+
     private Optional<ConnectorPageSource> loadPages(SignatureIds ids, CacheSplitId splitId, TupleDomain<CacheColumnId> predicate, TupleDomain<CacheColumnId> unenforcedPredicate)
     {
         checkPredicates(ids, predicate, unenforcedPredicate);
@@ -237,9 +250,9 @@ public class MemoryCacheManager
 
     private boolean hasChannelsWithSameStoreId(SignatureIds ids, CacheSplitId splitId, TupleDomain<CacheColumnId> predicate, TupleDomain<CacheColumnId> unenforcedPredicate)
     {
-        return getChannelsWithSameStoreId(ids, splitId, predicate, unenforcedPredicate, false).long2ObjectEntrySet().stream()
+        return getChannelsWithSameStoreId(ids, splitId, predicate, unenforcedPredicate, false).values().stream()
                 // find store id that contain channels for all columns
-                .anyMatch(entry -> entry.getValue().size() == ids.columnIds().length);
+                .anyMatch(channels -> channels.size() == ids.columnIds().length);
     }
 
     private Optional<List<Channel>> getLoadedChannelsWithSameStoreId(
@@ -366,6 +379,10 @@ public class MemoryCacheManager
             cacheRevocableBytes += entriesSize;
             removeEldestChannels(channels);
         });
+
+        for (Channel channel : channels) {
+            channel.setCompleted();
+        }
     }
 
     private void abortStoreChannels(SignatureIds signatureIds, PredicateIds predicateIds, Channel[] channels)
@@ -379,6 +396,10 @@ public class MemoryCacheManager
                 columnToId.releaseId(channel.getKey().columnId());
             }
         });
+
+        for (Channel channel : channels) {
+            channel.setCompleted();
+        }
     }
 
     private boolean removeChannel(Channel channel)
@@ -561,6 +582,13 @@ public class MemoryCacheManager
         private MemorySplitCache(SignatureIds ids)
         {
             this.ids = ids;
+        }
+
+        @Override
+        public CompletableFuture<Void> waitForPages(CacheSplitId splitId, TupleDomain<CacheColumnId> predicate, TupleDomain<CacheColumnId> unenforcedPredicate)
+        {
+            checkState(!closed, "MemorySplitCache already closed");
+            return MemoryCacheManager.this.waitForPages(ids, splitId, predicate, unenforcedPredicate);
         }
 
         @Override
@@ -749,6 +777,7 @@ public class MemoryCacheManager
 
         private final SplitKey key;
         private final long storeId;
+        private final CompletableFuture<Void> completed = new CompletableFuture<>();
         private volatile boolean loaded;
         private volatile Block[] blocks;
         private volatile long blocksRetainedSizeInBytes;
@@ -769,6 +798,16 @@ public class MemoryCacheManager
         {
             checkState(!loaded);
             loaded = true;
+        }
+
+        public CompletableFuture<?> getCompleted()
+        {
+            return completed;
+        }
+
+        public void setCompleted()
+        {
+            completed.complete(null);
         }
 
         public Block[] getBlocks()
