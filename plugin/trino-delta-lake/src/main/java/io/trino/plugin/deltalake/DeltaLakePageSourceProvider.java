@@ -340,6 +340,12 @@ public class DeltaLakePageSourceProvider
                 .filter((handle, domain) -> !domain.contains(split.getStatisticsPredicate().getDomain((DeltaLakeColumnHandle) handle, domain.getType())));
     }
 
+    @Override
+    public boolean shouldPerformDynamicRowFiltering()
+    {
+        return true;
+    }
+
     public Map<Integer, String> loadParquetIdAndNameMapping(TrinoInputFile inputFile, ParquetReaderOptions options)
     {
         try (ParquetDataSource dataSource = new TrinoParquetDataSource(inputFile, options, fileFormatDataSourceStats)) {

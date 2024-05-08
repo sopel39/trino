@@ -18,6 +18,7 @@ import io.trino.Session;
 import io.trino.connector.CatalogServiceProvider;
 import io.trino.metadata.Split;
 import io.trino.metadata.TableHandle;
+import io.trino.operator.dynamicfiltering.DynamicRowFilteringPageSourceProvider;
 import io.trino.spi.connector.CatalogHandle;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorPageSource;
@@ -38,21 +39,23 @@ public class PageSourceManager
         implements PageSourceProviderFactory
 {
     private final CatalogServiceProvider<ConnectorPageSourceProviderFactory> pageSourceProviderFactory;
+    private final DynamicRowFilteringPageSourceProvider dynamicRowFilteringPageSourceProvider;
 
     @Inject
-    public PageSourceManager(CatalogServiceProvider<ConnectorPageSourceProviderFactory> pageSourceProviderFactory)
+    public PageSourceManager(CatalogServiceProvider<ConnectorPageSourceProviderFactory> pageSourceProviderFactory, DynamicRowFilteringPageSourceProvider dynamicRowFilteringPageSourceProvider)
     {
         this.pageSourceProviderFactory = requireNonNull(pageSourceProviderFactory, "pageSourceProviderFactory is null");
+        this.dynamicRowFilteringPageSourceProvider = requireNonNull(dynamicRowFilteringPageSourceProvider, "dynamicRowFilteringPageSourceProvider is null");
     }
 
     @Override
     public PageSourceProvider createPageSourceProvider(CatalogHandle catalogHandle)
     {
         ConnectorPageSourceProviderFactory provider = pageSourceProviderFactory.getService(catalogHandle);
-        return new PageSourceProviderInstance(provider.createPageSourceProvider());
+        return new PageSourceProviderInstance(provider.createPageSourceProvider(), dynamicRowFilteringPageSourceProvider);
     }
 
-    private record PageSourceProviderInstance(ConnectorPageSourceProvider pageSourceProvider)
+    private record PageSourceProviderInstance(ConnectorPageSourceProvider pageSourceProvider, DynamicRowFilteringPageSourceProvider dynamicRowFilteringPageSourceProvider)
             implements PageSourceProvider
     {
         private PageSourceProviderInstance
@@ -77,11 +80,19 @@ public class PageSourceManager
             if (!isAllowPushdownIntoConnectors(session)) {
                 dynamicFilter = DynamicFilter.EMPTY;
             }
-            return pageSourceProvider.createPageSource(
+            ConnectorPageSource pageSource = pageSourceProvider.createPageSource(
                     table.transaction(),
                     session.toConnectorSession(table.catalogHandle()),
                     split.getConnectorSplit(),
                     table.connectorHandle(),
+                    columns,
+                    dynamicFilter);
+            if (!pageSourceProvider.shouldPerformDynamicRowFiltering()) {
+                return pageSource;
+            }
+            return dynamicRowFilteringPageSourceProvider.createPageSource(
+                    pageSource,
+                    session,
                     columns,
                     dynamicFilter);
         }
@@ -97,7 +108,13 @@ public class PageSourceManager
 
             CatalogHandle catalogHandle = split.getCatalogHandle();
             ConnectorSession connectorSession = session.toConnectorSession(catalogHandle);
-            return pageSourceProvider.getUnenforcedPredicate(connectorSession, split.getConnectorSplit(), table.connectorHandle(), dynamicFilter);
+            if (!isAllowPushdownIntoConnectors(session)) {
+                dynamicFilter = TupleDomain.all();
+            }
+            if (!pageSourceProvider.shouldPerformDynamicRowFiltering()) {
+                return pageSourceProvider.getUnenforcedPredicate(connectorSession, split.getConnectorSplit(), table.connectorHandle(), dynamicFilter);
+            }
+            return dynamicRowFilteringPageSourceProvider.getUnenforcedPredicate(pageSourceProvider, session, connectorSession, split.getConnectorSplit(), table.connectorHandle(), dynamicFilter);
         }
 
         @Override

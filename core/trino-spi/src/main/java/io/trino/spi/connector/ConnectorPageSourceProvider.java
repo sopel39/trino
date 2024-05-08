@@ -57,4 +57,13 @@ public interface ConnectorPageSourceProvider
     {
         throw new UnsupportedOperationException();
     }
+
+    /**
+     * Returns whether the engine should perform dynamic row filtering on top of the returned page source.
+     * While dynamic row filtering can be extended to any connector, it is currently restricted to data lake connectors.
+     */
+    default boolean shouldPerformDynamicRowFiltering()
+    {
+        return false;
+    }
 }

@@ -73,4 +73,12 @@ public class ClassLoaderSafeConnectorPageSourceProvider
             return delegate.prunePredicate(session, split, table, predicate);
         }
     }
+
+    @Override
+    public boolean shouldPerformDynamicRowFiltering()
+    {
+        try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
+            return delegate.shouldPerformDynamicRowFiltering();
+        }
+    }
 }

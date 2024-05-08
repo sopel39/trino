@@ -294,6 +294,12 @@ public class HivePageSourceProvider
                 .filter((columnHandle, domain) -> !prefilledColumns.contains(columnHandle));
     }
 
+    @Override
+    public boolean shouldPerformDynamicRowFiltering()
+    {
+        return true;
+    }
+
     private static boolean shouldSkipBucket(HiveTableHandle hiveTable, HiveSplit hiveSplit, TupleDomain<ColumnHandle> predicate)
     {
         if (hiveSplit.getTableBucketNumber().isEmpty()) {
