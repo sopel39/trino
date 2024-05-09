@@ -23,11 +23,14 @@ import java.util.Map;
 public interface ConnectorSplit
 {
     /**
-     * Returns true when this ConnectorSplit can be scheduled on any node.
+     * Returns true if this ConnectorSplit could be scheduled on any node.
+     * If {@link #getAddresses()} is not empty, then split will be scheduled
+     * on a node with one of the addresses returned by {@link #getAddresses()}
+     * if such node is part of the cluster. Otherwise, the split will be scheduled on any node.
      * <p>
-     * When true, the addresses returned by {@link #getAddresses()} may be used as hints by the scheduler
-     * during splits assignment.
-     * When false, the split will always be scheduled on one of the addresses returned by {@link #getAddresses()}.
+     * When this method returns false, the split will always be scheduled on a node with one
+     * of the addresses returned by {@link #getAddresses()}. Query will fail if such node is
+     * not available.
      */
     default boolean isRemotelyAccessible()
     {

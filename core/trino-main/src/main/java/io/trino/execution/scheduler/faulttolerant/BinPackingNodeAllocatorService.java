@@ -645,7 +645,13 @@ public class BinPackingNodeAllocatorService
             catalogNodes.ifPresent(candidates::retainAll); // Drop non-catalog nodes, if any.
             Set<HostAddress> addresses = requirements.getAddresses();
             if (!addresses.isEmpty()) {
-                candidates = candidates.stream().filter(node -> addresses.contains(node.getHostAndPort())).collect(toImmutableList());
+                List<InternalNode> preferred = candidates.stream().filter(node -> addresses.contains(node.getHostAndPort())).collect(toImmutableList());
+                if (preferred.isEmpty() && requirements.isRemotelyAccessible()) {
+                    candidates = dropCoordinatorsIfNecessary(candidates);
+                }
+                else {
+                    candidates = preferred;
+                }
             }
             else {
                 candidates = dropCoordinatorsIfNecessary(candidates);
