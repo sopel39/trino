@@ -45,6 +45,7 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.sdk.trace.SpanProcessor;
 import io.trino.Session;
 import io.trino.SystemSessionPropertiesProvider;
+import io.trino.cache.CacheMetadata;
 import io.trino.connector.CatalogManagerConfig.CatalogMangerKind;
 import io.trino.connector.CatalogManagerModule;
 import io.trino.connector.ConnectorServicesProvider;
@@ -185,6 +186,7 @@ public class TestingTrinoServer
     private final TestingHttpServer server;
     private final TransactionManager transactionManager;
     private final TablePropertyManager tablePropertyManager;
+    private final CacheMetadata cacheMetadata;
     private final PlannerContext plannerContext;
     private final QueryExplainer queryExplainer;
     private final SessionPropertyManager sessionPropertyManager;
@@ -380,6 +382,7 @@ public class TestingTrinoServer
         server = injector.getInstance(TestingHttpServer.class);
         transactionManager = injector.getInstance(TransactionManager.class);
         tablePropertyManager = injector.getInstance(TablePropertyManager.class);
+        cacheMetadata = injector.getInstance(CacheMetadata.class);
         globalFunctionCatalog = injector.getInstance(GlobalFunctionCatalog.class);
         plannerContext = injector.getInstance(PlannerContext.class);
         accessControl = injector.getInstance(TestingAccessControlManager.class);
@@ -560,6 +563,11 @@ public class TestingTrinoServer
     public TablePropertyManager getTablePropertyManager()
     {
         return tablePropertyManager;
+    }
+
+    public CacheMetadata getCacheMetadata()
+    {
+        return cacheMetadata;
     }
 
     public PlannerContext getPlannerContext()
