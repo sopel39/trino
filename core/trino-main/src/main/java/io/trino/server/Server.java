@@ -39,6 +39,8 @@ import io.airlift.openmetrics.JmxOpenMetricsModule;
 import io.airlift.tracetoken.TraceTokenModule;
 import io.airlift.tracing.TracingModule;
 import io.airlift.units.Duration;
+import io.trino.cache.CacheManagerModule;
+import io.trino.cache.CacheManagerRegistry;
 import io.trino.client.NodeVersion;
 import io.trino.connector.CatalogManagerConfig;
 import io.trino.connector.CatalogManagerConfig.CatalogMangerKind;
@@ -126,6 +128,7 @@ public class Server
                 new AccessControlModule(),
                 new EventListenerModule(),
                 new ExchangeManagerModule(),
+                new CacheManagerModule(),
                 new CoordinatorDiscoveryModule(),
                 new CatalogManagerModule(),
                 new TransactionManagerModule(),
@@ -175,6 +178,7 @@ public class Server
                     .ifPresent(PasswordAuthenticatorManager::loadPasswordAuthenticator);
             injector.getInstance(GroupProviderManager.class).loadConfiguredGroupProvider();
             injector.getInstance(ExchangeManagerRegistry.class).loadExchangeManager();
+            injector.getInstance(CacheManagerRegistry.class).loadCacheManager();
             injector.getInstance(CertificateAuthenticatorManager.class).loadCertificateAuthenticator();
             injector.getInstance(Key.get(new TypeLiteral<Optional<HeaderAuthenticatorManager>>() {}))
                     .ifPresent(HeaderAuthenticatorManager::loadHeaderAuthenticator);
