@@ -543,11 +543,6 @@ public class PlanTester
         return plannerContext;
     }
 
-    public CacheMetadata getCacheMetadata()
-    {
-        return plannerContext.getCacheMetadata();
-    }
-
     public TablePropertyManager getTablePropertyManager()
     {
         return tablePropertyManager;
