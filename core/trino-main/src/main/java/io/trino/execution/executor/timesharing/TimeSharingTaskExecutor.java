@@ -15,6 +15,7 @@ package io.trino.execution.executor.timesharing;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Ticker;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.errorprone.annotations.ThreadSafe;
 import com.google.errorprone.annotations.concurrent.GuardedBy;
@@ -38,19 +39,23 @@ import io.trino.execution.executor.TaskExecutor;
 import io.trino.execution.executor.TaskHandle;
 import io.trino.spi.TrinoException;
 import io.trino.spi.VersionEmbedder;
+import io.trino.spi.cache.CacheSplitId;
 import io.trino.tracing.TrinoAttributes;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.weakref.jmx.Managed;
 import org.weakref.jmx.Nested;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Queue;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.concurrent.ConcurrentHashMap;
@@ -446,48 +451,107 @@ public class TimeSharingTaskExecutor
 
     private synchronized void scheduleTaskIfNecessary(TimeSharingTaskHandle taskHandle)
     {
+        scheduleTaskIfNecessary(taskHandle, runningCacheSplitIds());
+        // If we have less than the minimum number of drivers running per task, force start some splits even if
+        // they are not cached yet. This is such that system always have some drivers running to make progress.
+        scheduleTaskIfNecessary(taskHandle, ImmutableSet.of());
+        recordLeafSplitsSize();
+    }
+
+    private synchronized void scheduleTaskIfNecessary(TimeSharingTaskHandle taskHandle, Set<CacheSplitId> runningCacheSplitIds)
+    {
         // if task has less than the minimum guaranteed splits running,
         // immediately schedule new splits for this task.  This assures
         // that a task gets its fair amount of consideration (you have to
         // have splits to be considered for running on a thread).
         int splitsToSchedule = min(guaranteedNumberOfDriversPerTask, taskHandle.getMaxDriversPerTask().orElse(Integer.MAX_VALUE)) - taskHandle.getRunningLeafSplits();
-        for (int i = 0; i < splitsToSchedule; ++i) {
+        int scheduledSplits = 0;
+        Queue<PrioritizedSplitRunner> unscheduledSplits = new ArrayDeque<>();
+        while (scheduledSplits < splitsToSchedule) {
             PrioritizedSplitRunner split = taskHandle.pollNextSplit();
             if (split == null) {
                 // no more splits to schedule
-                return;
+                break;
             }
 
-            startSplit(split);
-            splitQueuedTime.add(Duration.nanosSince(split.getCreatedNanos()));
+            // Do not start the split if there's already a split with the same cache id running. This is done to
+            // improve cache utilization.
+            if (split.getCacheSplitId().isPresent() && runningCacheSplitIds.contains(split.getCacheSplitId().get())) {
+                unscheduledSplits.add(split);
+                continue;
+            }
+
+            startLeafSplit(split);
+            scheduledSplits++;
         }
-        recordLeafSplitsSize();
+
+        // put back unscheduled splits
+        for (PrioritizedSplitRunner split : unscheduledSplits) {
+            taskHandle.enqueueSplit(split);
+        }
     }
 
     private synchronized void addNewEntrants()
     {
+        addNewEntrants(runningCacheSplitIds());
+        // If we have less than the minimum number of drivers running, force start some splits even if
+        // they are not cached yet. This is such that system always have some drivers running to make progress.
+        addNewEntrants(ImmutableSet.of());
+    }
+
+    private synchronized void addNewEntrants(Set<CacheSplitId> runningCacheSplitIds)
+    {
         // Ignore intermediate splits when checking minimumNumberOfDrivers.
-        // Otherwise with (for example) minimumNumberOfDrivers = 100, 200 intermediate splits
+        // Otherwise, with (for example) minimumNumberOfDrivers = 100, 200 intermediate splits
         // and 100 leaf splits, depending on order of appearing splits, number of
         // simultaneously running splits may vary. If leaf splits start first, there will
         // be 300 running splits. If intermediate splits start first, there will be only
         // 200 running splits.
-        int running = allSplits.size() - intermediateSplits.size();
-        for (int i = 0; i < minimumNumberOfDrivers - running; i++) {
+        int runningSplits = allSplits.size() - intermediateSplits.size();
+        Queue<PrioritizedSplitRunner> unscheduledSplits = new ArrayDeque<>();
+        while (runningSplits < minimumNumberOfDrivers) {
             PrioritizedSplitRunner split = pollNextSplitWorker();
             if (split == null) {
                 break;
             }
 
-            splitQueuedTime.add(Duration.nanosSince(split.getCreatedNanos()));
-            startSplit(split);
+            // Do not start the split if there's already a split with the same cache id running. This is done to
+            // improve cache utilization.
+            if (split.getCacheSplitId().isPresent() && runningCacheSplitIds.contains(split.getCacheSplitId().get())) {
+                unscheduledSplits.add(split);
+                continue;
+            }
+
+            startLeafSplit(split);
+            runningSplits++;
         }
+
+        // put back unscheduled splits
+        for (PrioritizedSplitRunner split : unscheduledSplits) {
+            split.getTaskHandle().enqueueSplit(split);
+        }
+    }
+
+    private synchronized Set<CacheSplitId> runningCacheSplitIds()
+    {
+        return allSplits.stream()
+                .map(PrioritizedSplitRunner::getCacheSplitId)
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .collect(toImmutableSet());
     }
 
     private synchronized void startIntermediateSplit(PrioritizedSplitRunner split)
     {
         startSplit(split);
         intermediateSplits.add(split);
+    }
+
+    private synchronized void startLeafSplit(PrioritizedSplitRunner split)
+    {
+        split.getTaskHandle().splitStarted(split);
+        startSplit(split);
+        splitQueuedTime.add(Duration.nanosSince(split.getCreatedNanos()));
     }
 
     private synchronized void startSplit(PrioritizedSplitRunner split)

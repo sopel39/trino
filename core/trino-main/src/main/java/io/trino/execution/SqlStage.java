@@ -22,6 +22,7 @@ import io.airlift.units.Duration;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
 import io.trino.Session;
+import io.trino.cache.SplitAdmissionControllerProvider;
 import io.trino.execution.StateMachine.StateChangeListener;
 import io.trino.execution.buffer.OutputBuffers;
 import io.trino.execution.scheduler.SplitSchedulerStats;
@@ -64,6 +65,7 @@ public final class SqlStage
     private final RemoteTaskFactory remoteTaskFactory;
     private final NodeTaskMap nodeTaskMap;
     private final boolean summarizeTaskInfo;
+    private final SplitAdmissionControllerProvider splitAdmissionControllerProvider;
 
     private final Set<DynamicFilterId> outboundDynamicFilterIds;
 
@@ -86,7 +88,8 @@ public final class SqlStage
             Executor stateMachineExecutor,
             Tracer tracer,
             Span schedulerSpan,
-            SplitSchedulerStats schedulerStats)
+            SplitSchedulerStats schedulerStats,
+            SplitAdmissionControllerProvider splitAdmissionControllerProvider)
     {
         requireNonNull(stageId, "stageId is null");
         requireNonNull(fragment, "fragment is null");
@@ -113,7 +116,8 @@ public final class SqlStage
                 stateMachine,
                 remoteTaskFactory,
                 nodeTaskMap,
-                summarizeTaskInfo);
+                summarizeTaskInfo,
+                splitAdmissionControllerProvider);
         sqlStage.initialize();
         return sqlStage;
     }
@@ -123,13 +127,15 @@ public final class SqlStage
             StageStateMachine stateMachine,
             RemoteTaskFactory remoteTaskFactory,
             NodeTaskMap nodeTaskMap,
-            boolean summarizeTaskInfo)
+            boolean summarizeTaskInfo,
+            SplitAdmissionControllerProvider splitAdmissionControllerProvider)
     {
         this.session = requireNonNull(session, "session is null");
         this.stateMachine = stateMachine;
         this.remoteTaskFactory = requireNonNull(remoteTaskFactory, "remoteTaskFactory is null");
         this.nodeTaskMap = requireNonNull(nodeTaskMap, "nodeTaskMap is null");
         this.summarizeTaskInfo = summarizeTaskInfo;
+        this.splitAdmissionControllerProvider = requireNonNull(splitAdmissionControllerProvider, "splitAdmissionControllerProvider is null");
 
         if (isEnableCoordinatorDynamicFiltersDistribution(session)) {
             this.outboundDynamicFilterIds = getOutboundDynamicFilters(stateMachine.getFragment());
@@ -275,7 +281,8 @@ public final class SqlStage
                 nodeTaskMap.createPartitionedSplitCountTracker(node, taskId),
                 outboundDynamicFilterIds,
                 estimatedMemory,
-                summarizeTaskInfo);
+                summarizeTaskInfo,
+                splitAdmissionControllerProvider);
 
         noMoreSplits.forEach(task::noMoreSplits);
 

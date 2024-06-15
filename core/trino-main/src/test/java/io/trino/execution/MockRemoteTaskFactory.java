@@ -29,6 +29,7 @@ import io.airlift.units.Duration;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.trino.Session;
+import io.trino.cache.SplitAdmissionControllerProvider;
 import io.trino.cost.StatsAndCosts;
 import io.trino.exchange.ExchangeManagerRegistry;
 import io.trino.execution.NodeTaskMap.PartitionedSplitCountTracker;
@@ -142,7 +143,8 @@ public class MockRemoteTaskFactory
                 partitionedSplitCountTracker,
                 ImmutableSet.of(),
                 Optional.empty(),
-                true);
+                true,
+                new SplitAdmissionControllerProvider(ImmutableList.of(), TEST_SESSION));
     }
 
     @Override
@@ -158,7 +160,8 @@ public class MockRemoteTaskFactory
             PartitionedSplitCountTracker partitionedSplitCountTracker,
             Set<DynamicFilterId> outboundDynamicFilterIds,
             Optional<DataSize> estimatedMemory,
-            boolean summarizeTaskInfo)
+            boolean summarizeTaskInfo,
+            SplitAdmissionControllerProvider splitAdmissionControllerProvider)
     {
         return new MockRemoteTask(taskId, fragment, node.getNodeIdentifier(), executor, scheduledExecutor, initialSplits, partitionedSplitCountTracker);
     }
