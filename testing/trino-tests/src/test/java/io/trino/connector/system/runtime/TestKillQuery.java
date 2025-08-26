@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.parallel.ExecutionMode.SAME_THREAD;
 public class TestKillQuery
         extends AbstractTestQueryFramework
 {
-    private final ExecutorService executor = Executors.newSingleThreadScheduledExecutor(threadsNamed(TestKillQuery.class.getSimpleName()));
+    private final ExecutorService executor = Executors.newCachedThreadPool(threadsNamed(TestKillQuery.class.getSimpleName()));
 
     @Override
     protected QueryRunner createQueryRunner()
@@ -80,6 +80,35 @@ public class TestKillQuery
     {
         killQuery(queryId -> format("CALL system.runtime.kill_query('%s', 'because')", queryId), "Message: because");
         killQuery(queryId -> format("CALL system.runtime.kill_query('%s')", queryId), "No message provided.");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testKillUserQueries()
+    {
+        String user = "test_user";
+        Future<?> firstQuery = executor.submit(() -> getQueryRunner().execute(getSession(user), "SELECT count(comment) FROM tpch.sf100000.lineitem"));
+        Future<?> secondQuery = executor.submit(() -> getQueryRunner().execute(getSession(user), "SELECT count(comment) FROM tpch.sf100000.lineitem"));
+
+        while (true) {
+            long count = (Long) computeActual(format("SELECT count(*) FROM system.runtime.queries WHERE user = '%s' AND query NOT LIKE '%%system.runtime.queries%%'", user)).getOnlyValue();
+            if (count >= 2) {
+                break;
+            }
+            sleepUninterruptibly(50, TimeUnit.MILLISECONDS);
+        }
+
+        assertThat(firstQuery.isDone()).isFalse();
+        assertThat(secondQuery.isDone()).isFalse();
+
+        getQueryRunner().execute(format("CALL system.runtime.kill_user_queries('%s', 'because')", user));
+
+        assertThatThrownBy(() -> firstQuery.get(1, TimeUnit.MINUTES))
+                .isInstanceOf(ExecutionException.class)
+                .hasMessageContaining("Query killed. Message: because");
+        assertThatThrownBy(() -> secondQuery.get(1, TimeUnit.MINUTES))
+                .isInstanceOf(ExecutionException.class)
+                .hasMessageContaining("Query killed. Message: because");
     }
 
     private void killQuery(Function<String, String> sql, String expectedKilledMessage)
@@ -122,6 +151,12 @@ public class TestKillQuery
     public void testKillQueryWithNullArgument()
     {
         assertQueryFails("CALL system.runtime.kill_query(NULL, 'should fail')", "query_id cannot be null");
+    }
+
+    @Test
+    public void testKillUserQueriesWithNullArgument()
+    {
+        assertQueryFails("CALL system.runtime.kill_user_queries(NULL, 'should fail')", "user cannot be null");
     }
 
     private Session getSession(String user)

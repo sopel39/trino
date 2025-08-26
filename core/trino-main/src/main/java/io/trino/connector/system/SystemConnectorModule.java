@@ -76,8 +76,10 @@ public class SystemConnectorModule
 
         Multibinder<Procedure> procedures = Multibinder.newSetBinder(binder, Procedure.class);
         procedures.addBinding().toProvider(KillQueryProcedure.class).in(Scopes.SINGLETON);
+        procedures.addBinding().toProvider(KillUserQueriesProcedure.class).in(Scopes.SINGLETON);
 
         binder.bind(KillQueryProcedure.class).in(Scopes.SINGLETON);
+        binder.bind(KillUserQueriesProcedure.class).in(Scopes.SINGLETON);
 
         binder.bind(GlobalSystemConnector.class).in(Scopes.SINGLETON);
 

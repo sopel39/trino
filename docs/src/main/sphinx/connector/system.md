@@ -142,6 +142,13 @@ specified `message`. `message` is optional.
 
 :::
 
+::{function} runtime.kill_user_queries(user, message)
+
+Kill all running queries for the specified `user`. The failure message of each
+query includes the specified `message`. `message` is optional.
+
+:::
+
 (system-type-mapping)=
 ## Type mapping
 
